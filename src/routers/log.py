@@ -1,4 +1,5 @@
 import csv
+import io
 from datetime import datetime
 from typing import Dict
 
@@ -10,40 +11,69 @@ from ..database import Group, Log, get_db
 log_router = APIRouter()
 
 
-def parse_csv(file) -> Dict:
-    reader = csv.reader(file)
-    rows = list(reader)
+def parse_csv(file: UploadFile) -> Dict:
+    # Read the entire file content into memory
+    file_content = file.file.read()
+
+    try:
+        # Attempt to decode the file with utf-8 encoding
+        text_file = io.StringIO(file_content.decode("utf-8"))
+        reader = csv.reader(text_file)
+        rows = list(reader)
+    except UnicodeDecodeError:
+        # Fallback to a more permissive encoding (e.g., latin-1)
+        text_file = io.StringIO(file_content.decode("latin-1"))
+        reader = csv.reader(text_file)
+        rows = list(reader)
 
     # Extract metadata from the top rows
-    log_date = rows[0][0]  # Assuming the date is in the first cell of the first row
-    vin = rows[0][5].split(":")[1].strip()  # Extract VIN from the first row
-    motor_type = rows[2][
-        0
-    ].strip()  # Assuming motor type is in the first cell of the third row
+    log_date = ",".join(rows[0][:4])
+    vin = rows[0][5].split(":")[1].strip()
+    motor_type = rows[1][0].strip()
 
     # Extract group names and sensor headers
     group_headers = rows[3]  # Group names (e.g., Group A, Group B, etc.)
     sensor_headers = rows[4]  # Sensor names (e.g., Engine speed, MAF, etc.)
+    units_headers = rows[5]  # Units or ranges for the sensors
 
-    # Map group names to their sensor headers
+    # Map group names to their sensor headers and units
     groups = {}
     for i, header in enumerate(group_headers):
         if header.startswith("Group"):
             group_name = header.strip(":")
             groups[group_name] = {
-                "sensors": sensor_headers[
-                    i : i + 5
-                ]  # Adjust range based on CSV structure
+                "sensors": [],
             }
+            # Dynamically map sensors and units for this group
+            for j in range(i + 1, len(sensor_headers)):
+                if sensor_headers[j]:  # Skip empty sensor headers
+                    groups[group_name]["sensors"].append(
+                        {
+                            "name": sensor_headers[j].strip(),
+                            "unit": (
+                                units_headers[j].strip()
+                                if j < len(units_headers)
+                                else None
+                            ),
+                        }
+                    )
 
-    # Parse sensor values
-    for row in rows[5:]:  # Data rows
-        timestamp = float(row[1])  # Assuming timestamp is in the second column
+    for row in rows[6:]:
+        if not row or not row[0]:
+            continue
+        try:
+            timestamp = float(row[1])
+        except ValueError:
+            continue
+
         for group_name, group_data in groups.items():
             for i, sensor in enumerate(group_data["sensors"]):
-                if sensor:  # Skip empty sensor headers
-                    value = row[i + 2]  # Adjust index based on CSV structure
-                    group_data.setdefault("values", {}).setdefault(sensor, []).append(
+                sensor_index = i + 2  # Adjust index based on CSV structure
+                if sensor_index < len(row):
+                    value = row[sensor_index]
+                    group_data.setdefault("values", {}).setdefault(
+                        sensor["name"], []
+                    ).append(
                         {
                             "timestamp": timestamp,
                             "value": float(value) if value else None,
@@ -60,11 +90,11 @@ def parse_csv(file) -> Dict:
 
 @log_router.post("/upload/")
 async def upload_csv(file: UploadFile, db: Session = Depends(get_db)):
-    if not file.filename.endswith(".csv"):
+    if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Invalid file format")
 
     # Parse CSV directly from the uploaded file
-    parsed_data = parse_csv(file.file)
+    parsed_data = parse_csv(file)
 
     # Extract metadata
     log_date = parsed_data["log_date"]
@@ -97,7 +127,7 @@ async def upload_csv(file: UploadFile, db: Session = Depends(get_db)):
     }
 
 
-@log_router.get("/logs/{log_id}")
+@log_router.get("/{log_id}")
 def get_log(log_id: int, db: Session = Depends(get_db)):
     log = db.query(Log).filter(Log.id == log_id).first()
     if not log:

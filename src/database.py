@@ -13,7 +13,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
 password = os.getenv("DB_PASSWORD", "default_password")
-username = os.getenv("DB_USERNAME", "default_user")
+username = os.getenv("DB_USER", "default_user")
 database_name = os.getenv("DB_NAME", "default_db")
 host = os.getenv("DB_HOST", "localhost")
 port = os.getenv("DB_PORT", "5432")
@@ -43,12 +43,13 @@ class Log(Base):
     created_at = Column(DateTime)
     vin = Column(String, index=True)
     motor_type = Column(String)
+    groups = relationship("Group", back_populates="log")
 
 
 class Group(Base):
     __tablename__ = "groups"
     id = Column(Integer, primary_key=True, index=True)
-    log_id = Column(Integer, ForeignKey("logs.id"))
-    group_name = Column(String)
+    log_id = Column(Integer, ForeignKey("logs.id"), nullable=False)
+    group_name = Column(String, nullable=False)
     sensors = Column(JSON)
     log = relationship("Log", back_populates="groups")

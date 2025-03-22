@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   app-dev:
     build:
@@ -7,6 +5,8 @@ services:
       dockerfile: Dockerfile
     platform: linux/amd64
     container_name: vcdsvisualizer_dev
+    env_file:
+      - .env
     environment:
       - PYTHONPATH=/app
       - DB_USER=${DB_USER}
@@ -35,11 +35,26 @@ services:
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
   database:
-    image: postgres:15
+    image: postgres:17
     container_name: vcdsvisualizer_postgres
+    env_file:
+      - .env
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
     ports:
       - "5432:5432"
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: vcdsvisualizer_pgadmin
+    env_file:
+      - .env
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    depends_on:
+      - database

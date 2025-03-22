@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -6,13 +8,24 @@ from fastapi.middleware.cors import CORSMiddleware
 # from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from .database import Base, engine
 from .routers.log import log_router
 
 load_dotenv(".env")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Creating database tables...")
+    Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully.")
+    yield
+
+
 app = FastAPI(
     title="VCDS Log Visualizer",
     description="A web application for visualizing VCDS csv logs.",
+    lifespan=lifespan,
 )
 
 allow_origins = [
@@ -31,7 +44,6 @@ app.add_middleware(
 app.include_router(log_router, prefix="/api/logs", tags=["logs"])
 
 app.mount("/", app=StaticFiles(directory="src/client-app", html=True), name="root")
-
 
 # @app.get("/", tags=["root"])
 # async def redirect_to_swagger():

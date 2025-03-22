@@ -1,6 +1,8 @@
 const uploadForm = document.querySelector('#upload-form');
 const logCardsContainer = document.querySelector('#log-cards-container');
 
+const API_BASE_URL = "http://127.0.0.1:8000";
+
 uploadForm.addEventListener('submit', async (event) => {
     event.preventDefault();
 
@@ -16,7 +18,7 @@ uploadForm.addEventListener('submit', async (event) => {
     formData.append('file', file);
 
     try {
-        const response = await fetch('/api/logs/upload/', {
+        const response = await fetch(`${API_BASE_URL}/api/logs/upload/`, {
             method: 'POST',
             body: formData,
         });
@@ -26,6 +28,7 @@ uploadForm.addEventListener('submit', async (event) => {
         }
 
         const result = await response.json();
+        console.log('Upload result:', result);
         alert('File uploaded successfully!');
         fetchLogs();
     } catch (error) {
@@ -69,4 +72,4 @@ function visualizeLog(logId) {
     // Add logic to visualize the log (e.g., redirect to a visualization page)
 }
 
-fetchLogs();
+// fetchLogs();
