@@ -3,13 +3,13 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-
-# from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
 
-from .database import init_db
+from .database import Log, get_db, init_db
 from .routers.log import log_router
 
 load_dotenv(".env")
@@ -51,12 +51,18 @@ app.add_middleware(
 
 app.include_router(log_router, prefix="/api/logs", tags=["logs"])
 
-app.mount("/", app=StaticFiles(directory="src/client-app", html=True), name="root")
+app.mount(
+    "/static", app=StaticFiles(directory="src/client-app", html=True), name="static"
+)
+templates = Jinja2Templates(directory="src/client-app/templates")
 
-# @app.get("/", tags=["root"])
-# async def redirect_to_swagger():
-#     response = RedirectResponse(url="/docs")
-#     return response
+
+@app.get("/", tags=["dashboard"])
+async def dashboard(request: Request, db: Session = Depends(get_db)):
+    logs = db.query(Log).all()
+    return templates.TemplateResponse(
+        "dashboard.html", {"request": request, "logs": logs}
+    )
 
 
 if __name__ == "__main__":

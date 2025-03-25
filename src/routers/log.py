@@ -62,7 +62,6 @@ def get_logs(limit: int = 10, offset: int = 0, db: Session = Depends(get_db)):
     logs = db.query(Log).offset(offset).limit(limit).all()
     return logs
 
-
 @log_router.delete("/")
 def delete_all_logs(db: Session = Depends(get_db)):
     db.query(Group).delete()
@@ -76,7 +75,24 @@ def get_groups_by_log_id(log_id: int, db: Session = Depends(get_db)):
     groups = db.query(Group).filter(Group.log_id == log_id).all()
     if not groups:
         raise HTTPException(status_code=404, detail="Groups not found")
-    return groups
+
+    # Return structured sensor data
+    return {
+        "log_id": log_id,
+        "groups": [
+            {
+                "group_name": group.group_name,
+                "sensors": [
+                    {
+                        "name": sensor_name,
+                        "values": values
+                    }
+                    for sensor_name, values in group.sensors.items()
+                ]
+            }
+            for group in groups
+        ]
+    }
 
 
 @log_router.get("/groups/")
