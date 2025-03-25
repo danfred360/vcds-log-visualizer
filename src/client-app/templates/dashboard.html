@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VCDS Log Visualizer</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>VCDS Log Visualizer</h1>
+
+    <div class="controls">
+        <label for="log-select">Select Log:</label>
+        <select id="log-select"></select>
+
+        <label for="group-select">Select Group:</label>
+        <select id="group-select">
+            <option value="Group A">Group A</option>
+            <option value="Group B">Group B</option>
+            <option value="Group C">Group C</option>
+        </select>
+
+        <label for="start-slider">Start Time:</label>
+        <input type="range" id="start-slider" min="0" max="100" step="1" value="0">
+        <p id="start-time-value">Start Time: 0 sec</p>
+
+        <label for="end-slider">End Time:</label>
+        <input type="range" id="end-slider" min="0" max="100" step="1" value="100">
+        <p id="end-time-value">End Time: Full</p>
+    </div>
+
+    <div class="chart-container">
+        <div class="chart-box">
+            <h2 id="chartTitle">Group A</h2>
+            <canvas id="chartCanvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let chartInstance = null;
+        let originalGroupData = null;
+        let sensorColors = {};
+        let throttleTimer = null; // To throttle updates
+
+        async function fetchLogs() {
+            const response = await fetch("/api/logs?limit=20");
+            const logs = await response.json();
+            
+            const logSelect = document.getElementById("log-select");
+            logSelect.innerHTML = "";
+            logs.forEach(log => {
+                let option = document.createElement("option");
+                option.value = log.id;
+                option.textContent = `${log.name} - ${new Date(log.created_at).toLocaleString()}`;
+                logSelect.appendChild(option);
+            });
+
+            if (logs.length > 0) {
+                fetchLogGroups(logs[0].id);
+            }
+        }
+
+        async function fetchLogGroups(logId) {
+            try {
+                const response = await fetch(`/api/logs/${logId}/groups/`);
+                if (!response.ok) throw new Error("Failed to fetch log data");
+
+                originalGroupData = await response.json();
+                initializeSensorColors(originalGroupData);
+                updateChartVisibility();
+            } catch (error) {
+                console.error("Error fetching log groups:", error);
+            }
+        }
+
+        function initializeSensorColors(groupData) {
+            groupData.groups.forEach(group => {
+                group.sensors.forEach(sensor => {
+                    if (!sensorColors[sensor.name]) {
+                        sensorColors[sensor.name] = `hsl(${Math.random() * 360}, 70%, 50%)`;
+                    }
+                });
+            });
+        }
+
+        function renderChart(selectedGroup, filteredData = null) {
+            if (!originalGroupData || !originalGroupData.groups) return;
+
+            const group = filteredData
+                ? filteredData.groups.find(g => g.group_name === selectedGroup)
+                : originalGroupData.groups.find(g => g.group_name === selectedGroup);
+            if (!group || !group.sensors.length) return;
+
+            let selectedSensors = group.sensors.slice(0, 4);
+
+            let allTimestamps = new Set();
+            selectedSensors.forEach(sensor => {
+                sensor.values.forEach(v => allTimestamps.add(v.timestamp));
+            });
+
+            let sortedTimestamps = [...allTimestamps].sort((a, b) => a - b);
+
+            let datasets = selectedSensors.map(sensor => {
+                let sensorDataMap = new Map(sensor.values.map(v => [v.timestamp, v.value]));
+                let alignedData = sortedTimestamps.map(ts => sensorDataMap.get(ts) || null);
+
+                return {
+                    label: sensor.name,
+                    data: alignedData,
+                    fill: false,
+                    borderColor: sensorColors[sensor.name]
+                };
+            });
+
+            const canvas = document.getElementById("chartCanvas");
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            document.getElementById("chartTitle").textContent = selectedGroup;
+
+            chartInstance = new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: { labels: sortedTimestamps, datasets },
+                options: { 
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false
+                }
+            });
+        }
+
+        function updateTimeFilter() {
+            if (!originalGroupData) return;
+
+            const maxTime = Math.max(...originalGroupData.groups.flatMap(g => g.sensors[0]?.values.map(v => v.timestamp) || [0]));
+            const startTime = (document.getElementById("start-slider").value / 100) * maxTime;
+            const endTime = (document.getElementById("end-slider").value / 100) * maxTime;
+
+            if (startTime >= endTime) return;
+
+            document.getElementById("start-time-value").textContent = `Start Time: ${startTime.toFixed(2)} sec`;
+            document.getElementById("end-time-value").textContent = `End Time: ${endTime.toFixed(2)} sec`;
+
+            let filteredGroupData = JSON.parse(JSON.stringify(originalGroupData));
+
+            filteredGroupData.groups.forEach(group => {
+                group.sensors.forEach(sensor => {
+                    sensor.values = sensor.values.filter(v => v.timestamp >= startTime && v.timestamp <= endTime);
+                });
+            });
+
+            if (throttleTimer) clearTimeout(throttleTimer);
+            throttleTimer = setTimeout(() => {
+                renderChart(document.getElementById("group-select").value, filteredGroupData);
+            }, 200); // Throttle updates to 200ms
+        }
+
+        function updateChartVisibility() {
+            let selectedGroup = document.getElementById("group-select").value;
+            renderChart(selectedGroup);
+        }
+
+        document.getElementById("log-select").addEventListener("change", function() {
+            fetchLogGroups(this.value);
+        });
+
+        document.getElementById("group-select").addEventListener("change", updateChartVisibility);
+        document.getElementById("start-slider").addEventListener("input", updateTimeFilter);
+        document.getElementById("end-slider").addEventListener("input", updateTimeFilter);
+
+        fetchLogs();
+    </script>
+</body>
+</html>

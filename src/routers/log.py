@@ -21,10 +21,11 @@ async def upload_csv(file: UploadFile, db: Session = Depends(get_db)):
     created_at = parsed_data["created_at"]
     vin = parsed_data["vin"]
     motor_type = parsed_data["motor_type"]
+    name = f"{vin} - {motor_type} - {created_at.strftime('%Y-%m-%d %H:%M:%S')}"
     groups = parsed_data["groups"]
 
     log = Log(
-        name="Example Log",
+        name=name,
         description=f"Log for VIN {vin} with motor type {motor_type}",
         created_at=created_at,
     )
@@ -62,6 +63,7 @@ def get_logs(limit: int = 10, offset: int = 0, db: Session = Depends(get_db)):
     logs = db.query(Log).offset(offset).limit(limit).all()
     return logs
 
+
 @log_router.delete("/")
 def delete_all_logs(db: Session = Depends(get_db)):
     db.query(Group).delete()
@@ -83,15 +85,12 @@ def get_groups_by_log_id(log_id: int, db: Session = Depends(get_db)):
             {
                 "group_name": group.group_name,
                 "sensors": [
-                    {
-                        "name": sensor_name,
-                        "values": values
-                    }
+                    {"name": sensor_name, "values": values}
                     for sensor_name, values in group.sensors.items()
-                ]
+                ],
             }
             for group in groups
-        ]
+        ],
     }
 
 
