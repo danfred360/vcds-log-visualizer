@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -8,18 +9,25 @@ from fastapi.middleware.cors import CORSMiddleware
 # from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .database import Base, engine
+from .database import init_db
 from .routers.log import log_router
 
 load_dotenv(".env")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Creating database tables...")
-    Base.metadata.create_all(bind=engine)
-    print("Database tables created successfully.")
-    yield
+    logger.info("Creating database tables...")
+    init_db()
+    logger.info("Database tables created successfully.")
+    try:
+        yield
+    finally:
+        logger.info("Shutting down the application...")
 
 
 app = FastAPI(

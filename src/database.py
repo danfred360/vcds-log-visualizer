@@ -12,27 +12,29 @@ from sqlalchemy import (
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
-password = os.getenv("DB_PASSWORD", "default_password")
-username = os.getenv("DB_USER", "default_user")
-database_name = os.getenv("DB_NAME", "default_db")
-host = os.getenv("DB_HOST", "localhost")
-port = os.getenv("DB_PORT", "5432")
-url = "postgresql://{}:{}@{}:{}/{}".format(
-    username, password, host, port, database_name
-)
+password = os.getenv("DB_PASSWORD")
+username = os.getenv("DB_USER")
+database_name = os.getenv("DB_NAME")
+host = os.getenv("DB_HOST")
+port = os.getenv("DB_PORT")
+url = f"postgresql://{username}:{password}@{host}:{port}/{database_name}"
 
 engine = create_engine(url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 Base = declarative_base()
 
 
-# Dependency
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
 
 
 class Log(Base):

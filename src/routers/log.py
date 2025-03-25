@@ -1,91 +1,12 @@
-import csv
-import io
 from datetime import datetime
-from typing import Dict
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..database import Group, Log, get_db
+from ..vcds_parser import VCDSParser
 
 log_router = APIRouter()
-
-
-def parse_csv(file: UploadFile) -> Dict:
-    # Read the entire file content into memory
-    file_content = file.file.read()
-
-    try:
-        # Attempt to decode the file with utf-8 encoding
-        text_file = io.StringIO(file_content.decode("utf-8"))
-        reader = csv.reader(text_file)
-        rows = list(reader)
-    except UnicodeDecodeError:
-        # Fallback to a more permissive encoding (e.g., latin-1)
-        text_file = io.StringIO(file_content.decode("latin-1"))
-        reader = csv.reader(text_file)
-        rows = list(reader)
-
-    # Extract metadata from the top rows
-    log_date = ",".join(rows[0][:4])
-    vin = rows[0][5].split(":")[1].strip()
-    motor_type = rows[1][0].strip()
-
-    # Extract group names and sensor headers
-    group_headers = rows[3]  # Group names (e.g., Group A, Group B, etc.)
-    sensor_headers = rows[4]  # Sensor names (e.g., Engine speed, MAF, etc.)
-    units_headers = rows[5]  # Units or ranges for the sensors
-
-    # Map group names to their sensor headers and units
-    groups = {}
-    for i, header in enumerate(group_headers):
-        if header.startswith("Group"):
-            group_name = header.strip(":")
-            groups[group_name] = {
-                "sensors": [],
-            }
-            # Dynamically map sensors and units for this group
-            for j in range(i + 1, len(sensor_headers)):
-                if sensor_headers[j]:  # Skip empty sensor headers
-                    groups[group_name]["sensors"].append(
-                        {
-                            "name": sensor_headers[j].strip(),
-                            "unit": (
-                                units_headers[j].strip()
-                                if j < len(units_headers)
-                                else None
-                            ),
-                        }
-                    )
-
-    for row in rows[6:]:
-        if not row or not row[0]:
-            continue
-        try:
-            timestamp = float(row[1])
-        except ValueError:
-            continue
-
-        for group_name, group_data in groups.items():
-            for i, sensor in enumerate(group_data["sensors"]):
-                sensor_index = i + 2  # Adjust index based on CSV structure
-                if sensor_index < len(row):
-                    value = row[sensor_index]
-                    group_data.setdefault("values", {}).setdefault(
-                        sensor["name"], []
-                    ).append(
-                        {
-                            "timestamp": timestamp,
-                            "value": float(value) if value else None,
-                        }
-                    )
-
-    return {
-        "log_date": log_date,
-        "vin": vin,
-        "motor_type": motor_type,
-        "groups": groups,
-    }
 
 
 @log_router.post("/upload/")
@@ -93,20 +14,19 @@ async def upload_csv(file: UploadFile, db: Session = Depends(get_db)):
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Invalid file format")
 
-    # Parse CSV directly from the uploaded file
-    parsed_data = parse_csv(file)
+    parser = VCDSParser()
+    parsed_data = parser.parse_csv(file)
 
     # Extract metadata
-    log_date = parsed_data["log_date"]
+    created_at = parsed_data["created_at"]
     vin = parsed_data["vin"]
     motor_type = parsed_data["motor_type"]
     groups = parsed_data["groups"]
 
-    # Store in database
     log = Log(
         name="Example Log",
         description=f"Log for VIN {vin} with motor type {motor_type}",
-        created_at=datetime.strptime(log_date, "%A,%d,%B,%Y"),  # Parse the date
+        created_at=created_at,
     )
     db.add(log)
     db.commit()
@@ -121,7 +41,8 @@ async def upload_csv(file: UploadFile, db: Session = Depends(get_db)):
     db.commit()
     return {
         "message": "CSV uploaded and parsed successfully",
-        "log_date": log_date,
+        "log_id": log.id,
+        "created_at": created_at,
         "vin": vin,
         "motor_type": motor_type,
     }
@@ -133,3 +54,32 @@ def get_log(log_id: int, db: Session = Depends(get_db)):
     if not log:
         raise HTTPException(status_code=404, detail="Log not found")
     return log
+
+
+# route at route that takes top query parameter to determine how many logs to return and pagination
+@log_router.get("/")
+def get_logs(limit: int = 10, offset: int = 0, db: Session = Depends(get_db)):
+    logs = db.query(Log).offset(offset).limit(limit).all()
+    return logs
+
+
+@log_router.delete("/")
+def delete_all_logs(db: Session = Depends(get_db)):
+    db.query(Group).delete()
+    db.query(Log).delete()
+    db.commit()
+    return {"message": "All logs deleted successfully"}
+
+
+@log_router.get("/{log_id}/groups/")
+def get_groups_by_log_id(log_id: int, db: Session = Depends(get_db)):
+    groups = db.query(Group).filter(Group.log_id == log_id).all()
+    if not groups:
+        raise HTTPException(status_code=404, detail="Groups not found")
+    return groups
+
+
+@log_router.get("/groups/")
+def get_groups(limit: int = 10, offset: int = 0, db: Session = Depends(get_db)):
+    groups = db.query(Group).offset(offset).limit(limit).all()
+    return groups
